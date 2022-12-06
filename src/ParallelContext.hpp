@@ -1,23 +1,26 @@
 #ifndef RAXML_PARALLELCONTEXT_HPP_
 #define RAXML_PARALLELCONTEXT_HPP_
 
-#include <vector>
+#include <functional>
+#include <kamping/collectives/bcast.hpp>
+#include <kamping/collectives/reduce.hpp>
+#include <kamping/communicator.hpp>
+#include <kamping/mpi_ops.hpp>
+#include <memory>
+#include <optional>
 #include <set>
 #include <unordered_map>
-#include <memory>
-
-#include <functional>
+#include <vector>
 
 #include "io/BinaryStream.hpp"
-
 
 #ifdef _RAXML_MPI
 #include <mpi.h>
 #endif
 
 #ifdef _RAXML_PTHREADS
-#include <thread>
 #include <mutex>
+#include <thread>
 typedef std::thread ThreadType;
 typedef std::thread::id ThreadIDType;
 typedef std::mutex MutexType;
@@ -31,10 +34,9 @@ typedef int LockType;
 
 class Options;
 
-struct ThreadGroup
-{
-  size_t group_id;           /* global ID */
-  size_t local_group_id;     /* ID within MPI rank */
+struct ThreadGroup {
+  size_t group_id;       /* global ID */
+  size_t local_group_id; /* ID within MPI rank */
   size_t num_threads;
   std::vector<char> reduction_buf;
 
@@ -42,22 +44,24 @@ struct ThreadGroup
   volatile unsigned int barrier_counter;
   volatile int proceed;
 
-  ThreadGroup(size_t id, size_t local_id, size_t size, size_t bufsize = 0) :
-    group_id(id), local_group_id(local_id), num_threads(size), reduction_buf(bufsize),
-    mtx(), barrier_counter(0), proceed(0) {}
+  ThreadGroup(size_t id, size_t local_id, size_t size, size_t bufsize = 0)
+      : group_id(id), local_group_id(local_id), num_threads(size),
+        reduction_buf(bufsize), mtx(), barrier_counter(0), proceed(0) {}
 
-  ThreadGroup(ThreadGroup&& other):
-    group_id(other.group_id), local_group_id(other.local_group_id),
-    num_threads(other.num_threads), reduction_buf(std::move(other.reduction_buf)),
-    mtx(), barrier_counter(other.barrier_counter), proceed(other.proceed) {}
+  ThreadGroup(ThreadGroup &&other)
+      : group_id(other.group_id), local_group_id(other.local_group_id),
+        num_threads(other.num_threads),
+        reduction_buf(std::move(other.reduction_buf)), mtx(),
+        barrier_counter(other.barrier_counter), proceed(other.proceed) {}
 };
 
-class ParallelContext
-{
+class ParallelContext {
 public:
-  static void init_mpi(int argc, char * argv[], void * comm);
-  static void init_pthreads(const Options& opts, const std::function<void()>& thread_main);
-  static void resize_buffers(size_t reduce_buf_size, size_t worker_buf_size = 0);
+  static void init_mpi(int argc, char *argv[], void *comm);
+  static void init_pthreads(const Options &opts,
+                            const std::function<void()> &thread_main);
+  static void resize_buffers(size_t reduce_buf_size,
+                             size_t worker_buf_size = 0);
 
   static void finalize(bool force = false);
 
@@ -72,35 +76,51 @@ public:
   static size_t ranks_per_group() { return _num_ranks / _num_groups; }
   static bool coarse_mpi() { return _num_ranks > 1 && _num_groups > 1; }
 
-  static void mpi_reduce(double * data, size_t size, int op);
-  static void mpi_allreduce(double * data, size_t size, int op);
-  static void parallel_reduce_cb(void * context, double * data, size_t size, int op);
-  static void parallel_reduce(double * data, size_t size, int op);
-  static void thread_reduce(double * data, size_t size, int op);
-  static void thread_broadcast(size_t source_id, void * data, size_t size);
-  void thread_send_master(size_t source_id, void * data, size_t size) const;
+  template <typename DataType, typename Op>
+  static void mpi_reduce_single(DataType const &data, Op const &op) {
+    _kamping->reduce_single(kamping::send_buf(data),
+                            kamping::op(op, kamping::ops::commutative));
+  }
 
-  static void mpi_broadcast(void * data, size_t size);
-  template<typename T> static void mpi_broadcast(T& obj)
-  {
-    if (_num_ranks > 1)
-    {
-      size_t size = master() ?
-          BinaryStream::serialize(_parallel_buf.data(), _parallel_buf.capacity(), obj) : 0;
-      mpi_broadcast((void *) &size, sizeof(size_t));
-      mpi_broadcast((void *) _parallel_buf.data(), size);
-      if (!master())
-      {
+  static void mpi_reduce(double *data, size_t size, MPI_Op op);
+  static void mpi_allreduce(double *data, size_t size, MPI_Op op);
+  static void parallel_reduce_cb(void *context, double *data, size_t size,
+                                 int op);
+  static void parallel_reduce(double *data, size_t size, int op);
+  static void thread_reduce(double *data, size_t size, int op);
+  static void thread_broadcast(size_t source_id, void *data, size_t size);
+  void thread_send_master(size_t source_id, void *data, size_t size) const;
+
+  static void mpi_broadcast(void *data, size_t size);
+
+  template <typename T>
+  static void mpi_broadcast_single(T &data) {
+    _kamping->bcast_single(kamping::send_recv_buf(data));
+  }
+
+  template <typename T>
+  static void mpi_broadcast(T &obj) {
+    if (_num_ranks > 1) {
+      if (master()) {
+        int const size = BinaryStream::serialize(_parallel_buf.data(),
+                                                 _parallel_buf.capacity(), obj);
+        _kamping->bcast(
+            kamping::send_recv_buf(kamping::Span(_parallel_buf.begin(), size)));
+      } else {
+        int size;
+        _kamping->bcast(kamping::send_recv_buf(_parallel_buf),
+                        kamping::send_recv_count_out(size));
         BinaryStream bs(_parallel_buf.data(), size);
         bs >> obj;
       }
     }
   }
 
-  static void global_master_broadcast(void * data, size_t size);
+  static void global_master_broadcast(void *data, size_t size);
 
-  static void mpi_gather_custom(std::function<size_t(void*,size_t)> prepare_send_cb,
-                                std::function<void(void*,size_t,size_t)> process_recv_cb);
+  static void mpi_gather_custom(
+      std::function<size_t(void *, size_t)> prepare_send_cb,
+      std::function<void(void *, size_t, size_t)> process_recv_cb);
 
   static bool master() { return proc_id() == 0; }
   static bool master_rank() { return _rank_id == 0; }
@@ -112,7 +132,9 @@ public:
 
   static size_t local_thread_id() { return _local_thread_id; }
   static size_t local_rank_id() { return _local_rank_id; }
-  static size_t local_proc_id() { return _local_rank_id * _num_threads + _local_thread_id; }
+  static size_t local_proc_id() {
+    return _local_rank_id * _num_threads + _local_thread_id;
+  }
   static size_t local_group_id() { return _thread_group->local_group_id; }
 
   static bool group_master() { return local_proc_id() == 0; }
@@ -124,7 +146,7 @@ public:
 
   static std::string node_name() { return _node_name; }
 
-  static ThreadGroup& thread_group(size_t id);
+  static ThreadGroup &thread_group(size_t id);
 
   static void barrier();
   static void global_barrier();
@@ -135,23 +157,23 @@ public:
 
   /* static singleton, no instantiation/copying/moving */
   ParallelContext() = delete;
-  ParallelContext(const ParallelContext& other) = delete;
-  ParallelContext(ParallelContext&& other) = delete;
-  ParallelContext& operator=(const ParallelContext& other) = delete;
-  ParallelContext& operator=(ParallelContext&& other) = delete;
+  ParallelContext(const ParallelContext &other) = delete;
+  ParallelContext(ParallelContext &&other) = delete;
+  ParallelContext &operator=(const ParallelContext &other) = delete;
+  ParallelContext &operator=(ParallelContext &&other) = delete;
 
-  class UniqueLock
-  {
+  class UniqueLock {
   public:
     UniqueLock() : _lock(mtx) {}
+
   private:
     LockType _lock;
   };
 
-  class GroupLock
-  {
+  class GroupLock {
   public:
     GroupLock() : _lock(_thread_group->mtx) {}
+
   private:
     LockType _lock;
   };
@@ -170,12 +192,14 @@ private:
   static size_t _local_rank_id;
   static thread_local size_t _thread_id;
   static thread_local size_t _local_thread_id;
-  static thread_local ThreadGroup * _thread_group;
+  static thread_local ThreadGroup *_thread_group;
 
   static std::vector<ThreadGroup> _thread_groups;
 
   static bool _node_master_rank;
   static std::string _node_name;
+  static std::optional<kamping::BasicCommunicator> _kamping;
+  static std::optional<kamping::Environment<>> _kamping_env;
 
 #ifdef _RAXML_MPI
   static bool _owns_comm;
@@ -183,9 +207,9 @@ private:
 #endif
 
   static void start_thread(size_t thread_id, size_t local_thread_id,
-                           ThreadGroup& thread_grp,
-                           const std::function<void()>& thread_main);
-  static void detect_num_nodes();
+                           ThreadGroup &thread_grp,
+                           const std::function<void()> &thread_main);
+  static MPI_Op pllmod_to_mpi_op(int op);
 };
 
 #endif /* RAXML_PARALLELCONTEXT_HPP_ */

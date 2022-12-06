@@ -2577,7 +2577,7 @@ void finalize_energy(RaxmlInstance& instance, const CheckpointFile& checkp)
   else
     instance.used_wh = 0;
 
-  ParallelContext::mpi_reduce(&instance.used_wh, 1, PLLMOD_COMMON_REDUCE_SUM);
+  ParallelContext::mpi_reduce_single(instance.used_wh, std::plus<decltype(instance.used_wh)>());
 }
 
 void init_parallel_buffers(const RaxmlInstance& instance)
@@ -2780,7 +2780,7 @@ void thread_infer_bootstrap(RaxmlInstance& instance, CheckpointManager& cm)
         }
 
         if (ParallelContext::master_thread())
-          ParallelContext::mpi_broadcast(&instance.bs_converged, sizeof(bool));
+          ParallelContext::mpi_broadcast_single(instance.bs_converged);
       }
 
       ParallelContext::global_thread_barrier();
@@ -3134,7 +3134,7 @@ int internal_main(int argc, char** argv, void* comm)
   try
   {
     // make sure all MPI ranks use the same random seed
-    ParallelContext::mpi_broadcast(&opts.random_seed, sizeof(long));
+    ParallelContext::mpi_broadcast_single(opts.random_seed);
     srand(opts.random_seed);
 
     logger().log_level(instance.opts.log_level);
