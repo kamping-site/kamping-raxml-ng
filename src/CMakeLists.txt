@@ -38,6 +38,7 @@ else()
   add_executable(raxml_module ${RAXML_SOURCES})
 endif()
 
+target_compile_features(raxml_module PRIVATE cxx_std_17)
 
 if (USE_LIBPLL_CMAKE)
   target_include_directories(raxml_module PRIVATE ${PLLMOD_EXPORTED_INCLUDE_PATH})
