@@ -68,6 +68,8 @@ set(RAXML_LIBS ${RAXML_LIBS} PARENT_SCOPE)
 #message(STATUS "Libs: ${RAXML_LIBS}")
 
 target_link_libraries(raxml_module ${RAXML_LIBS})
+target_link_libraries(raxml_module kamping::kamping)
+
 
 if (BUILD_AS_LIBRARY AND NOT APPLE)
   target_link_libraries(raxml_module gcc_s gcc)
