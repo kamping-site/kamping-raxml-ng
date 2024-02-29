@@ -39,3 +39,11 @@ release/
 .cproject
 .project
 .settings/
+
+# CMake output files
+compile_commands.json
+
+# Other files
+run/
+.cache/
+.vscode/
