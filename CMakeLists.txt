@@ -36,7 +36,7 @@ else()
 endif()
 
 set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_CXX_EXTENSIONS ON) # Needed by KaMPIng
 
 # set these flags globally for all subprojects (libpll etc.)
 set (CMAKE_CXX_FLAGS_DEBUG    "-Og -g" CACHE INTERNAL "")
