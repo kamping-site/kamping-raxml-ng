@@ -418,7 +418,6 @@ void ParallelContext::thread_send_master(size_t source_id, void *data,
   barrier();
 }
 
-// TODO Replace this once we have the sparse all2all
 void ParallelContext::mpi_gather_custom(
     std::function<size_t(void *, size_t)> prepare_send_cb,
     std::function<void(void *, size_t, size_t)> process_recv_cb) {
