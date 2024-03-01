@@ -55,7 +55,7 @@ else()
 endif()
 
 
-set(RAXML_LIBS ${LIBPLL_LIBS} m)
+set(RAXML_LIBS ${LIBPLL_LIBS} m kamping::kamping)
 
 if(USE_TERRAPHAST)
   set(RAXML_LIBS ${RAXML_LOCALDEPS_DIR}/lib/libterraces.a ${RAXML_LIBS})
@@ -68,7 +68,6 @@ set(RAXML_LIBS ${RAXML_LIBS} PARENT_SCOPE)
 #message(STATUS "Libs: ${RAXML_LIBS}")
 
 target_link_libraries(raxml_module ${RAXML_LIBS})
-target_link_libraries(raxml_module kamping::kamping)
 
 
 if (BUILD_AS_LIBRARY AND NOT APPLE)
