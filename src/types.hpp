@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <random>
+#include <cereal/types/set.hpp>
 
 
 enum class StartingTree
